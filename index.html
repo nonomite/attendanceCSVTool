@@ -1,292 +1,710 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <title>Biometrics Attendance</title>
-  <style>
-    body {background:#f0f0f0;font-family:'Segoe UI',Tahoma,Verdana,sans-serif;}
-    .formBox {margin:20px;text-align:center;}
-    .cardContainer {display:flex;flex-wrap:wrap;justify-content:flex-start;}
-    .card {
-      background:white;
-      box-shadow:1px 1px 5px rgba(0,0,0,0.2);
-      border-radius:6px;
-      margin:10px;
-      padding:10px;
-      width:320px;
-    }
+<meta charset="UTF-8">
+<title>Attendance Violation Monitor</title>
+<style>
+  :root{
+    --ink:#22102e;
+    --ink-soft:#6a5b78;
+    --line:#dcd0e8;
+    --bg:#f3eef9;
+    --panel:#ffffff;
+    --accent:#3b0075;
+    --accent-soft:#ece1f7;
+    --late:#b8860b;
+    --absent:#c0392b;
+    --missing:#a1592e;
+    --ok:#2f8f5b;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    background:var(--bg);
+    color:var(--ink);
+    font-family:'Segoe UI',Tahoma,Verdana,sans-serif;
+    font-size:14px;
+  }
+  header{
+    background:var(--panel);
+    border-bottom:1px solid var(--line);
+    padding:18px 24px;
+  }
+  header h1{margin:0;font-size:19px;letter-spacing:.2px;}
+  header p{margin:4px 0 0;color:var(--ink-soft);font-size:12.5px;}
 
-    .card h3 {margin:0 0 6px 0;font-size:14px;}
-    table {width:100%;border-collapse:collapse;font-size:11px;}
-    td,th {border:1px solid #999;padding:3px;text-align:left;}
-    @page {size:8.5in 13in landscape;margin:0.7cm;}
-    @media print {.formBox{display:none}.card{box-shadow:none;border:1px solid #000}}
-  </style>
-  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+  .wrap{max-width:1180px;margin:0 auto;padding:20px 24px 60px;}
+
+  .steps{display:flex;flex-wrap:wrap;gap:14px;margin-bottom:18px;}
+  .step{
+    background:var(--panel);
+    border:1px solid var(--line);
+    border-radius:10px;
+    padding:16px 18px;
+    flex:1 1 260px;
+  }
+  .step.disabled{opacity:.45;pointer-events:none;}
+  .step h2{
+    font-size:11.5px;text-transform:uppercase;letter-spacing:.06em;
+    color:var(--accent);margin:0 0 10px;
+  }
+  .field{margin-bottom:10px;}
+  .field label{display:block;font-size:12.5px;color:var(--ink-soft);margin-bottom:4px;}
+  input[type=date],input[type=file]{
+    width:100%;padding:7px 8px;border:1px solid var(--line);border-radius:6px;
+    font-size:13px;background:#fbfbfd;
+  }
+  .btn{
+    appearance:none;border:none;border-radius:6px;padding:9px 16px;
+    font-size:13px;font-weight:600;cursor:pointer;background:var(--accent);color:#fff;
+  }
+  .btn:hover{background:#2a0057;}
+  .btn.secondary{background:var(--accent-soft);color:var(--accent);}
+  .btn.secondary:hover{background:#ddc9ee;}
+  .btn:disabled{background:#c6cbd9;cursor:not-allowed;}
+  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;}
+
+  .status-msg{font-size:12.5px;color:var(--ink-soft);margin-top:8px;}
+  .status-msg.warn{color:var(--absent);}
+
+  .toolbar{
+    display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;
+    margin:26px 0 12px;
+  }
+  .tabs{display:flex;gap:6px;background:var(--panel);padding:4px;border-radius:8px;border:1px solid var(--line);}
+  .tab{padding:7px 14px;border-radius:6px;font-size:13px;cursor:pointer;color:var(--ink-soft);}
+  .tab.active{background:var(--accent);color:#fff;}
+
+  select{padding:7px 10px;border:1px solid var(--line);border-radius:6px;font-size:13px;background:#fff;}
+
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:18px;}
+
+  table{width:100%;border-collapse:collapse;font-size:12.5px;}
+  th,td{padding:7px 8px;text-align:left;border-bottom:1px solid var(--line);}
+  th{color:var(--ink-soft);font-weight:600;font-size:11.5px;text-transform:uppercase;letter-spacing:.04em;}
+  tr:hover td{background:#f7f8fc;}
+  td.num{text-align:right;font-variant-numeric:tabular-nums;}
+  .week-head td{background:var(--accent-soft);font-weight:700;color:var(--accent);border-bottom:none;padding-top:16px;}
+
+  .badge{display:inline-block;padding:1px 7px;border-radius:20px;font-size:11px;font-weight:600;}
+  .badge.late{background:#fbeed4;color:var(--late);}
+  .badge.absent{background:#fbdedb;color:var(--absent);}
+  .badge.missing{background:#fbe4d4;color:var(--missing);}
+  .badge.ok{background:#e1f4ea;color:var(--ok);}
+  .badge.exception{background:var(--accent-soft);color:var(--accent);}
+
+  .cardContainer{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 12px;}
+  .card h3{margin:0 0 8px;font-size:12.5px;overflow-wrap:anywhere;}
+  .card table{font-size:10.5px;}
+  .card th,.card td{padding:3px 4px;}
+
+  .empty{color:var(--ink-soft);font-size:13px;padding:30px 0;text-align:center;}
+
+  @media print{
+    header,.steps,.toolbar,.no-print{display:none;}
+    body{background:#fff;}
+    .panel{border:none;padding:0;}
+    table{font-size:11px;}
+  }
+</style>
+<style id="pageStyle"></style>
 </head>
 <body>
-  <div class="formBox">
-    <h2>Upload Users & Biometrics CSV</h2>
-    <label>Biometrics CSV: <input type="file" id="attendanceFile" accept=".csv"></label><br><br>
-    <label>Users CSV: <input type="file" id="namesFile" accept=".csv"></label><br><br>
-    <button onclick="processFiles()">Process Records</button>
-    <button onclick="sortByName()">Sort by Name</button>
-    <button onclick="window.print()">Print</button><br><br>
-    <label>View: <select id="userSelect" onchange="filterUser()">
-      <option value="all">All Users</option>
-    </select></label>
-  </div>
-  <div class="cardContainer" id="cards"></div>
 
+<header>
+  <h1>Scholars Attendance Violation Monitor</h1>
+  <p>Set the monitoring period, upload the records, get weekly violation counts.</p>
+</header>
+
+<div class="wrap">
+
+  <div class="steps">
+    <div class="step" id="stepRange">
+      <h2>1 &middot; Monitoring period</h2>
+      <div class="field">
+        <label for="startDate">Start date (a Monday)</label>
+        <input type="date" id="startDate">
+      </div>
+      <div class="field">
+        <label for="endDate">End date (a Saturday)</label>
+        <input type="date" id="endDate">
+      </div>
+      <button class="btn" onclick="confirmRange()">Set period</button>
+      <div class="status-msg" id="rangeMsg"></div>
+    </div>
+
+    <div class="step" id="stepExceptions">
+      <h2>2 &middot; Vacation &amp; holidays (optional)</h2>
+      <div class="field">
+        <label for="excStart">Start date</label>
+        <input type="date" id="excStart">
+      </div>
+      <div class="field">
+        <label for="excEnd">End date (leave blank for a single day)</label>
+        <input type="date" id="excEnd">
+      </div>
+      <div class="row" style="margin-bottom:10px;">
+        <select id="excType" style="flex:1;">
+          <option value="Vacation">Vacation</option>
+          <option value="Holiday">Holiday</option>
+        </select>
+        <input type="text" id="excLabel" placeholder="Label (optional, e.g. Rizal Day)" style="flex:2;padding:7px 8px;border:1px solid var(--line);border-radius:6px;font-size:13px;">
+      </div>
+      <button class="btn secondary" onclick="addException()">Add</button>
+      <div id="excList" style="margin-top:10px;font-size:12.5px;"></div>
+    </div>
+
+    <div class="step disabled" id="stepFiles">
+      <h2>3 &middot; Upload records</h2>
+      <div class="field">
+        <label for="namesFile">Users CSV (id, name)</label>
+        <input type="file" id="namesFile" accept=".csv">
+      </div>
+      <div class="field">
+        <label for="attendanceFile">Biometrics CSV (id, datetime, status)</label>
+        <input type="file" id="attendanceFile" accept=".csv">
+      </div>
+      <button class="btn" onclick="processFiles()">Process records</button>
+      <div class="status-msg" id="fileMsg"></div>
+    </div>
+  </div>
+
+  <div id="results" style="display:none;">
+    <div class="toolbar">
+      <div class="tabs no-print">
+        <div class="tab active" id="tabSummary" onclick="setView('summary')">Weekly summary</div>
+        <div class="tab" id="tabDaily" onclick="setView('daily')">Daily detail</div>
+        <div class="tab" id="tabThreshold" onclick="setView('threshold')">Late &gt; X min</div>
+      </div>
+      <div class="row no-print">
+        <input type="number" id="lateThreshold" value="5" min="0" style="width:70px;" onchange="renderThreshold()">
+        <select id="weekFilter" onchange="onWeekChange()"></select>
+        <select id="findingFilter" onchange="renderActive()" disabled>
+          <option value="all">All findings</option>
+          <option value="tardyCount">Tardiness</option>
+          <option value="absences">Absences</option>
+          <option value="nti">NTI</option>
+          <option value="nto">NTO</option>
+        </select>
+        <select id="sortBy" onchange="renderActive()" disabled>
+          <option value="name">Sort: Name</option>
+          <option value="absences">Sort: Highest absences</option>
+          <option value="tardyCount">Sort: Highest tardiness</option>
+          <option value="totalMinutesLate">Sort: Highest minutes late</option>
+          <option value="nti">Sort: Highest NTI</option>
+          <option value="nto">Sort: Highest NTO</option>
+        </select>
+        <select id="userSelect" onchange="renderDaily()"></select>
+        <select id="paperSize" onchange="updatePageStyle()">
+          <option value="letter">Letter</option>
+          <option value="folio">Folio</option>
+          <option value="a4">A4</option>
+        </select>
+        <select id="paperOrientation" onchange="updatePageStyle()">
+          <option value="portrait">Portrait</option>
+          <option value="landscape">Landscape</option>
+        </select>
+        <button class="btn secondary" onclick="window.print()">Print</button>
+      </div>
+    </div>
+
+    <div class="panel" id="summaryView"></div>
+    <div class="panel" id="dailyView" style="display:none;"><div class="cardContainer" id="cards"></div></div>
+    <div class="panel" id="thresholdView" style="display:none;"></div>
+  </div>
+
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
 <script>
-const OFFICIAL_IN = "08:00:59";
+// ---------- print page setup ----------
+const PAPER_SIZES = {
+  letter: {w:8.5, h:11},
+  folio:  {w:8.5, h:13},
+  a4:     {w:8.27, h:11.69}
+};
+function updatePageStyle(){
+  const size = PAPER_SIZES[document.getElementById("paperSize").value];
+  const orientation = document.getElementById("paperOrientation").value;
+  const [w,h] = orientation === "landscape" ? [size.h,size.w] : [size.w,size.h];
+  document.getElementById("pageStyle").textContent =
+    `@page{size:${w}in ${h}in;margin:0.7cm;}`;
+}
+const OFFICIAL_IN = "08:00:00";
 const OFFICIAL_OUT = "17:00:00";
 
-function toLocalDateStr(dt) {
-  const y = dt.getFullYear();
-  const m = String(dt.getMonth()+1).padStart(2,"0");
-  const d = String(dt.getDate()).padStart(2,"0");
+let periodStart = null;
+let periodEnd = null;
+let schoolDays = [];        // ["2026-07-27", ...] Mon-Sat only, within range
+let weeks = [];              // [{key:"2026-07-27", label:"Jul 27 - Aug 1", days:[...]}]
+let currentUsers = [];       // per-user violation data
+let currentView = "summary";
+
+// ---------- date helpers ----------
+function toLocalDateStr(dt){
+  const y=dt.getFullYear(), m=String(dt.getMonth()+1).padStart(2,"0"), d=String(dt.getDate()).padStart(2,"0");
   return `${y}-${m}-${d}`;
 }
+function parseDateInput(v){ const [y,m,d]=v.split("-").map(Number); return new Date(y,m-1,d); }
+function mondayOf(dateStr){
+  const d = parseDateInput(dateStr);
+  const day = d.getDay(); // 0 Sun ... 6 Sat
+  const diff = day===0 ? -6 : 1-day;
+  const mon = new Date(d); mon.setDate(d.getDate()+diff);
+  return toLocalDateStr(mon);
+}
+function fmtShort(dateStr){
+  const d = parseDateInput(dateStr);
+  return d.toLocaleDateString(undefined,{month:"short",day:"numeric"});
+}
 
-function parseCsvLine(line) {
-  const values = [];
-  let current = "";
-  let inQuotes = false;
+function confirmRange(){
+  const s = document.getElementById("startDate").value;
+  const e = document.getElementById("endDate").value;
+  const msg = document.getElementById("rangeMsg");
+  if(!s || !e){ msg.textContent="Pick both a start and end date."; msg.className="status-msg warn"; return; }
+  if(parseDateInput(e) < parseDateInput(s)){ msg.textContent="End date is before start date."; msg.className="status-msg warn"; return; }
 
-  for (let i = 0; i < line.length; i += 1) {
-    const char = line[i];
-    if (char === '"') {
-      if (inQuotes && line[i + 1] === '"') {
-        current += '"';
-        i += 1;
-      } else {
-        inQuotes = !inQuotes;
-      }
-    } else if (char === ',' && !inQuotes) {
-      values.push(current.trim());
-      current = "";
-    } else {
-      current += char;
+  periodStart = s; periodEnd = e;
+  schoolDays = [];
+  let cur = parseDateInput(s);
+  const end = parseDateInput(e);
+  while(cur <= end){
+    if(cur.getDay() !== 0) schoolDays.push(toLocalDateStr(cur)); // skip Sundays
+    cur.setDate(cur.getDate()+1);
+  }
+
+  // bucket into Mon-Sat weeks
+  const byWeek = {};
+  schoolDays.forEach(ds=>{
+    const wk = mondayOf(ds);
+    if(!byWeek[wk]) byWeek[wk]=[];
+    byWeek[wk].push(ds);
+  });
+  weeks = Object.keys(byWeek).sort().map(wk=>{
+    const days = byWeek[wk].sort();
+    return {key:wk, label:`${fmtShort(days[0])} \u2013 ${fmtShort(days[days.length-1])}`, days};
+  });
+
+  msg.textContent = `${schoolDays.length} school day(s) across ${weeks.length} week(s) locked in.`;
+  msg.className = "status-msg";
+  document.getElementById("stepFiles").classList.remove("disabled");
+}
+
+// ---------- vacation / holiday exceptions ----------
+let exceptions = [];       // [{start,end,type,label}]
+let exceptionByDate = {};  // "2026-07-27" -> {type,label}
+
+function rebuildExceptionLookup(){
+  exceptionByDate = {};
+  exceptions.forEach(ex=>{
+    let cur = parseDateInput(ex.start);
+    const end = parseDateInput(ex.end || ex.start);
+    while(cur <= end){
+      exceptionByDate[toLocalDateStr(cur)] = {type:ex.type, label:ex.label};
+      cur.setDate(cur.getDate()+1);
     }
-  }
-
-  values.push(current.trim());
-  return values;
-}
-
-function parseUsersCsv(text) {
-  const lines = String(text || "")
-    .replace(/\r\n?/g, "\n")
-    .split("\n")
-    .filter(line => line.trim());
-
-  if (lines.length <= 1) {
-    return [];
-  }
-
-  return lines.slice(1).map(line => {
-    const values = parseCsvLine(line);
-    if (!values.length) return null;
-
-    const id = String(values[0] || "").trim();
-    const name = values.slice(1).join(",").trim();
-    return id && name ? {id, name} : null;
-  }).filter(Boolean);
-}
-
-function parseBiometricsCsv(text) {
-  const lines = String(text || "")
-    .replace(/\r\n?/g, "\n")
-    .split("\n")
-    .filter(line => line.trim());
-
-  if (lines.length <= 1) {
-    return [];
-  }
-
-  return lines.slice(1).map(line => {
-    const values = parseCsvLine(line);
-    if (values.length < 3) return null;
-
-    const id = String(values[0] || "").trim();
-    const datetime = String(values[values.length - 2] || "").trim();
-    const status = String(values[values.length - 1] || "").trim().toLowerCase();
-
-    return id && datetime ? {id, datetime, status} : null;
-  }).filter(Boolean);
-}
-
-function readFileAsText(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = e => resolve(e.target.result);
-    reader.onerror = () => reject(new Error("Unable to read the selected file."));
-    reader.readAsText(file, "utf-8");
   });
 }
 
-function parseDateTimeValue(value) {
-  if (!value) return null;
-  if (value instanceof Date) return isNaN(value) ? null : value;
+function renderExceptionList(){
+  const box = document.getElementById("excList");
+  if(!exceptions.length){ box.innerHTML = '<span style="color:var(--ink-soft)">No dates added yet.</span>'; return; }
+  box.innerHTML = exceptions.map((ex,i)=>{
+    const range = ex.end && ex.end!==ex.start ? `${ex.start} to ${ex.end}` : ex.start;
+    const tag = ex.label ? ex.label : ex.type;
+    return `<div class="row" style="justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--line);">
+      <span>${range} &mdash; ${tag}</span>
+      <button class="btn secondary" style="padding:2px 8px;font-size:11px;" onclick="removeException(${i})">Remove</button>
+    </div>`;
+  }).join("");
+}
 
+function addException(){
+  const start = document.getElementById("excStart").value;
+  let end = document.getElementById("excEnd").value;
+  const type = document.getElementById("excType").value;
+  const label = document.getElementById("excLabel").value.trim();
+  if(!start){ alert("Pick at least a start date."); return; }
+  if(!end) end = start;
+  if(parseDateInput(end) < parseDateInput(start)){ alert("End date is before start date."); return; }
+
+  exceptions.push({start, end, type, label});
+  rebuildExceptionLookup();
+  renderExceptionList();
+  document.getElementById("excStart").value = "";
+  document.getElementById("excEnd").value = "";
+  document.getElementById("excLabel").value = "";
+
+  if(usersMeta.length) { buildCurrentUsers(); renderActive(); }
+}
+
+function removeException(i){
+  exceptions.splice(i,1);
+  rebuildExceptionLookup();
+  renderExceptionList();
+  if(usersMeta.length) { buildCurrentUsers(); renderActive(); }
+}
+
+// ---------- CSV parsing (papaparse) ----------
+function readFileAsText(file){
+  return new Promise((resolve,reject)=>{
+    const r = new FileReader();
+    r.onload = e=>resolve(e.target.result);
+    r.onerror = ()=>reject(new Error("Unable to read the selected file."));
+    r.readAsText(file,"utf-8");
+  });
+}
+function parseUsersCsv(text){
+  const rows = Papa.parse(text.trim(),{skipEmptyLines:true}).data;
+  return rows.slice(1).map(r=>{
+    const id = String(r[0]||"").trim();
+    const name = r.slice(1).join(",").trim();
+    return id && name ? {id,name} : null;
+  }).filter(Boolean);
+}
+function parseBiometricsCsv(text){
+  const rows = Papa.parse(text.trim(),{skipEmptyLines:true}).data;
+  return rows.slice(1).map(r=>{
+    if(r.length < 3) return null;
+    const id = String(r[0]||"").trim();
+    const datetime = String(r[r.length-2]||"").trim();
+    const status = String(r[r.length-1]||"").trim().toLowerCase();
+    return id && datetime ? {id,datetime,status} : null;
+  }).filter(Boolean);
+}
+function parseDateTimeValue(value){
+  if(!value) return null;
   const text = String(value).trim();
   const candidates = [text];
-  if (text.includes(" ")) {
-    candidates.push(text.replace(/ /, "T"));
-  }
-  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(text)) {
-    candidates.push(text.replace(/ /, "T"));
-  }
-
-  for (const candidate of candidates) {
-    const dt = new Date(candidate);
-    if (!isNaN(dt)) return dt;
-  }
-
+  if(text.includes(" ")) candidates.push(text.replace(/ /,"T"));
+  for(const c of candidates){ const dt=new Date(c); if(!isNaN(dt)) return dt; }
   return null;
 }
-
-function computeMinutesLate(actualDateTime, expectedTime) {
+function computeMinutesLate(actualDateTime, expectedTime){
   const actual = parseDateTimeValue(actualDateTime);
-  if (!actual) return null;
+  if(!actual) return 0;
   const datePart = toLocalDateStr(actual);
+  // Truncate seconds so "8:00:32" reads as "8:00", matching how the payroll
+  // sheet counts lateness in whole minutes, not seconds.
+  const actualTruncated = new Date(actual);
+  actualTruncated.setSeconds(0,0);
   const expected = new Date(`${datePart}T${expectedTime}`);
-  if (actual > expected) {
-    return Math.round((actual - expected)/60000);
-  }
-  return 0;
+  const diffMinutes = Math.floor((actualTruncated-expected)/60000);
+  return diffMinutes > 0 ? diffMinutes : 0;
 }
 
-let currentUsers = [];
-let nameSortAscending = true;
+// ---------- core processing ----------
+let rawById = {};    // punches grouped by id -> date -> {inPunches,outPunches}
+let usersMeta = [];  // parsed Users CSV rows
 
-function sortByName() {
-  if (!currentUsers.length) return;
-  currentUsers.sort((a, b) => a.name.localeCompare(b.name, undefined, {sensitivity: "base"}));
-  if (!nameSortAscending) currentUsers.reverse();
-  nameSortAscending = !nameSortAscending;
-  populateUserSelect();
-  filterUser();
-}
-
-function populateUserSelect() {
-  const select = document.getElementById("userSelect");
-  const previousValue = select.value || "all";
-  select.innerHTML = '<option value="all">All Users</option>';
-  currentUsers.forEach(user => {
-    const option = document.createElement("option");
-    option.value = user.id;
-    option.textContent = `${user.name} (${user.id})`;
-    select.appendChild(option);
-  });
-  const stillExists = previousValue === "all" || currentUsers.some(user => user.id === previousValue);
-  select.value = stillExists ? previousValue : "all";
-}
-
-function filterUser() {
-  const selectedId = document.getElementById("userSelect").value;
-  const usersToRender = selectedId === "all"
-    ? currentUsers
-    : currentUsers.filter(user => user.id === selectedId);
-  renderCards(usersToRender);
-}
-
-async function processFiles() {
+async function processFiles(){
   const attFile = document.getElementById("attendanceFile").files[0];
   const namesFile = document.getElementById("namesFile").files[0];
+  const msg = document.getElementById("fileMsg");
+  if(!attFile || !namesFile){ msg.textContent="Please upload both CSV files."; msg.className="status-msg warn"; return; }
 
-  if (!attFile || !namesFile) {
-    alert("Please upload both Biometrics and Users CSV.");
+  try{
+    const [usersText, attText] = await Promise.all([readFileAsText(namesFile), readFileAsText(attFile)]);
+    const users = parseUsersCsv(usersText);
+    if(!users.length){ msg.textContent="No valid rows found in the Users CSV."; msg.className="status-msg warn"; return; }
+
+    const punches = parseBiometricsCsv(attText);
+
+    const byId = {};
+    const matchedIds = new Set(users.map(u=>u.id));
+    punches.forEach(p=>{
+      const dt = parseDateTimeValue(p.datetime);
+      if(!dt) return;
+      const date = toLocalDateStr(dt);
+      if(!byId[p.id]) byId[p.id] = {};
+      if(!byId[p.id][date]) byId[p.id][date] = {inPunches:[], outPunches:[]};
+      const isIn = p.status.includes("in") && !p.status.includes("out");
+      const isOut = p.status.includes("out");
+      if(isIn) byId[p.id][date].inPunches.push(dt);
+      if(isOut) byId[p.id][date].outPunches.push(dt);
+    });
+
+    const unmatchedIds = Object.keys(byId).filter(id=>!matchedIds.has(id));
+
+    rawById = byId;
+    usersMeta = users;
+    buildCurrentUsers();
+
+    populateWeekFilter();
+    populateUserSelect();
+    document.getElementById("results").style.display = "block";
+    setView("summary");
+
+    msg.textContent = unmatchedIds.length
+      ? `Processed. ${unmatchedIds.length} biometric ID(s) did not match any user and were skipped: ${unmatchedIds.join(", ")}`
+      : "Processed. All biometric records matched a user.";
+    msg.className = unmatchedIds.length ? "status-msg warn" : "status-msg";
+  } catch(err){
+    msg.textContent = "Failed to process files: " + err.message;
+    msg.className = "status-msg warn";
+  }
+}
+
+function buildCurrentUsers(){
+  currentUsers = usersMeta.map(user=>{
+    const dayRecords = rawById[user.id] || {};
+    const days = schoolDays.map(date=>{
+      const rec = dayRecords[date];
+      if(!rec || (rec.inPunches.length===0 && rec.outPunches.length===0)){
+        const ex = exceptionByDate[date];
+        if(ex){
+          return {date, timeIn:null, timeOut:null, minutesLate:0, violation: ex.label || ex.type, isException:true};
+        }
+        return {date, timeIn:null, timeOut:null, minutesLate:0, violation:"Absent"};
+      }
+      const timeIn = rec.inPunches.length ? new Date(Math.min(...rec.inPunches)) : null;
+      const timeOut = rec.outPunches.length ? new Date(Math.max(...rec.outPunches)) : null;
+      let violation = "OK";
+      let minutesLate = 0;
+      if(!timeIn) violation = "No Time In";
+      else if(!timeOut) violation = "No Time Out";
+      else {
+        minutesLate = computeMinutesLate(timeIn, OFFICIAL_IN);
+        if(minutesLate>0) violation = "Late";
+      }
+      return {
+        date,
+        timeIn: timeIn ? timeIn.toTimeString().split(" ")[0] : null,
+        timeOut: timeOut ? timeOut.toTimeString().split(" ")[0] : null,
+        minutesLate, violation
+      };
+    });
+
+    const weekly = {};
+    weeks.forEach(w=>{
+      const wDays = days.filter(d=>w.days.includes(d.date));
+      weekly[w.key] = {
+        absences: wDays.filter(d=>d.violation==="Absent").length,
+        nti: wDays.filter(d=>d.violation==="No Time In").length,
+        nto: wDays.filter(d=>d.violation==="No Time Out").length,
+        tardyCount: wDays.filter(d=>d.violation==="Late").length,
+        totalMinutesLate: wDays.reduce((sum,d)=>sum+d.minutesLate,0)
+      };
+    });
+
+    return {id:user.id, name:user.name, days, weekly};
+  });
+}
+
+// ---------- view switching ----------
+function setView(v){
+  currentView = v;
+  document.getElementById("tabSummary").classList.toggle("active", v==="summary");
+  document.getElementById("tabDaily").classList.toggle("active", v==="daily");
+  document.getElementById("tabThreshold").classList.toggle("active", v==="threshold");
+  document.getElementById("summaryView").style.display = v==="summary" ? "block" : "none";
+  document.getElementById("dailyView").style.display = v==="daily" ? "block" : "none";
+  document.getElementById("thresholdView").style.display = v==="threshold" ? "block" : "none";
+  document.getElementById("weekFilter").style.display = "inline-block";
+  document.getElementById("userSelect").style.display = v==="daily" ? "inline-block" : "none";
+  document.getElementById("lateThreshold").style.display = v==="threshold" ? "inline-block" : "none";
+  if(v==="summary") renderSummary();
+  else if(v==="daily") renderDaily();
+  else renderThreshold();
+}
+
+function populateWeekFilter(){
+  const sel = document.getElementById("weekFilter");
+  sel.innerHTML = '<option value="all">All weeks</option>' +
+    weeks.map(w=>`<option value="${w.key}">${w.label}</option>`).join("");
+}
+function populateUserSelect(){
+  const sel = document.getElementById("userSelect");
+  sel.innerHTML = '<option value="all">All users</option>' +
+    currentUsers.map(u=>`<option value="${u.id}">${u.name} (${u.id})</option>`).join("");
+}
+
+function onWeekChange(){
+  const isAll = document.getElementById("weekFilter").value === "all";
+  document.getElementById("findingFilter").disabled = isAll;
+  document.getElementById("sortBy").disabled = isAll;
+  renderActive();
+}
+
+function renderActive(){
+  if(currentView === "summary") renderSummary();
+  else if(currentView === "daily") renderDaily();
+  else renderThreshold();
+}
+
+function renderThreshold(){
+  const target = document.getElementById("thresholdView");
+  const threshold = Number(document.getElementById("lateThreshold").value) || 0;
+  const weekFilterVal = document.getElementById("weekFilter")?.value || "all";
+  const weeksToScan = weekFilterVal==="all" ? weeks : weeks.filter(w=>w.key===weekFilterVal);
+
+  let rows = [];
+  currentUsers.forEach(u=>{
+    weeksToScan.forEach(w=>{
+      u.days.filter(d=>w.days.includes(d.date)).forEach(d=>{
+        if(d.violation==="Late" && d.minutesLate > threshold){
+          rows.push({name:u.name, id:u.id, week:w.label, date:d.date, timeIn:d.timeIn, minutesLate:d.minutesLate});
+        }
+      });
+    });
+  });
+  rows.sort((a,b)=>b.minutesLate - a.minutesLate);
+
+  if(!rows.length){
+    target.innerHTML = `<div class="empty">No one exceeded ${threshold} minute(s) late in this range.</div>`;
     return;
   }
 
-  try {
-    const [usersText, attText] = await Promise.all([
-      readFileAsText(namesFile),
-      readFileAsText(attFile)
-    ]);
-
-    const users = parseUsersCsv(usersText)
-      .filter(user => user.id && user.name);
-
-    if (users.length === 0) {
-      alert('No users found. Make sure the Users CSV has an id and name column.');
-      return;
-    }
-
-    const data = parseBiometricsCsv(attText)
-      .filter(r => r.id && r.datetime);
-
-    const byId = {};
-    data.forEach(r => {
-      const dt = parseDateTimeValue(r.datetime);
-      if (!dt) return;
-
-      if (!byId[r.id]) {
-        byId[r.id] = {};
-      }
-      const date = toLocalDateStr(dt);
-      if (!byId[r.id][date]) byId[r.id][date] = [];
-      byId[r.id][date].push({dt,status:r.status});
-    });
-
-    const matchedIds = new Set(users.map(user => user.id));
-    const unmatchedData = Object.keys(byId)
-      .filter(id => !matchedIds.has(id))
-      .map(id => ({
-        id,
-        name: `Unmatched ${id}`,
-        days: Object.keys(byId[id]).sort().map(date => {
-          const records = byId[id][date].sort((a,b)=>a.dt-b.dt);
-          const timeIn = records[0]?.dt.toTimeString().split(" ")[0] || null;
-          const timeOut = records[records.length-1]?.dt.toTimeString().split(" ")[0] || null;
-          const minutesLate = timeIn ? computeMinutesLate(`${date}T${timeIn}`, OFFICIAL_IN) : null;
-          return {date,timeIn,timeOut,minutesLate};
-        })
-      }));
-
-    const processed = [
-      ...users.map(user => {
-        const dayGroups = byId[user.id] || {};
-        const days = Object.keys(dayGroups).sort().map(date => {
-          const records = dayGroups[date].sort((a,b)=>a.dt-b.dt);
-          const timeIn = records[0]?.dt.toTimeString().split(" ")[0] || null;
-          const timeOut = records[records.length-1]?.dt.toTimeString().split(" ")[0] || null;
-          const minutesLate = timeIn ? computeMinutesLate(`${date}T${timeIn}`, OFFICIAL_IN) : null;
-          return {date,timeIn,timeOut,minutesLate};
-        });
-
-        return {
-          id: user.id,
-          name: user.name,
-          days: days.length ? days : [{date:"(no records)",timeIn:null,timeOut:null,minutesLate:null}]
-        };
-      }),
-      ...unmatchedData
-    ];
-
-    currentUsers = processed;
-    nameSortAscending = true;
-    populateUserSelect();
-    filterUser();
-  } catch (err) {
-    alert("Failed to read the uploaded CSV files: " + err.message);
-  }
-}
-
-function renderCards(users) {
-  const container=document.getElementById("cards");
-  container.innerHTML="";
-  users.forEach(user => {
-    let html=`<div class="card"><h3>${user.name} (${user.id})</h3><table><tr><th>Date</th><th>In</th><th>Out</th><th>Late(min)</th></tr>`;
-    user.days.forEach(d => {
-      html+=`<tr><td>${d.date}</td><td>${d.timeIn||"-"}</td><td>${d.timeOut||"-"}</td><td>${d.minutesLate!==null?d.minutesLate:"-"}</td></tr>`;
-    });
-    html+="</table></div>";
-    container.innerHTML+=html;
+  let html = `<table><thead><tr>
+    <th>Name</th><th>Biometrics ID</th><th>Week</th><th>Date</th><th>Time In</th><th class="num">Minutes Late</th>
+  </tr></thead><tbody>`;
+  rows.forEach(r=>{
+    html += `<tr><td>${r.name}</td><td>${r.id}</td><td>${r.week}</td><td>${r.date}</td><td>${r.timeIn||"-"}</td><td class="num">${r.minutesLate}</td></tr>`;
   });
+  html += "</tbody></table>";
+  target.innerHTML = html;
 }
+
+function renderSummary(){
+  const target = document.getElementById("summaryView");
+  const weekFilterVal = document.getElementById("weekFilter")?.value || "all";
+
+  if(weekFilterVal === "all"){
+    renderSummaryAllWeeks(target);
+    return;
+  }
+
+  const week = weeks.find(w=>w.key===weekFilterVal);
+  if(!week){ target.innerHTML='<div class="empty">No data yet.</div>'; return; }
+
+  const findingKey = document.getElementById("findingFilter").value;
+  const sortKey = document.getElementById("sortBy").value;
+
+  let rows = currentUsers.map(u=>({u, s:u.weekly[week.key]})).filter(r=>r.s);
+  // only students with at least one finding that week
+  rows = rows.filter(r=>(r.s.absences + r.s.nti + r.s.nto + r.s.tardyCount) > 0);
+  // finding-type filter
+  if(findingKey !== "all"){
+    rows = rows.filter(r=>r.s[findingKey] > 0);
+  }
+  // sort
+  if(sortKey === "name"){
+    rows.sort((a,b)=>a.u.name.localeCompare(b.u.name, undefined, {sensitivity:"base"}));
+  } else {
+    rows.sort((a,b)=>b.s[sortKey] - a.s[sortKey]);
+  }
+
+  if(!rows.length){
+    target.innerHTML = `<div class="empty">No scholars match this filter for ${week.label}.</div>`;
+    return;
+  }
+
+  let html = `<table><thead><tr>
+    <th>Name</th><th>Biometrics ID</th>
+    <th class="num">Late incidents</th><th class="num">Total minutes late</th>
+    <th class="num">Absences</th><th class="num">No time in</th><th class="num">No time out</th>
+  </tr></thead><tbody>`;
+  rows.forEach(({u,s})=>{
+    html += `<tr>
+      <td>${u.name}</td><td>${u.id}</td>
+      <td class="num">${s.tardyCount}</td><td class="num">${s.totalMinutesLate}</td>
+      <td class="num">${s.absences}</td><td class="num">${s.nti}</td><td class="num">${s.nto}</td>
+    </tr>`;
+  });
+  html += "</tbody></table>";
+  target.innerHTML = html;
+}
+
+function renderSummaryAllWeeks(target){
+  if(!weeks.length){ target.innerHTML='<div class="empty">No data yet.</div>'; return; }
+  let html = `<table><thead><tr>
+    <th>Name</th><th>Biometrics ID</th>
+    <th class="num">Late incidents</th><th class="num">Total minutes late</th>
+    <th class="num">Absences</th><th class="num">No time in</th><th class="num">No time out</th>
+  </tr></thead><tbody>`;
+  weeks.forEach(w=>{
+    html += `<tr class="week-head"><td colspan="7">${w.label}</td></tr>`;
+    currentUsers.forEach(u=>{
+      const s = u.weekly[w.key];
+      if(!s) return;
+      const total = s.absences + s.nti + s.nto + s.tardyCount;
+      if(total===0) return;
+      html += `<tr>
+        <td>${u.name}</td><td>${u.id}</td>
+        <td class="num">${s.tardyCount}</td><td class="num">${s.totalMinutesLate}</td>
+        <td class="num">${s.absences}</td><td class="num">${s.nti}</td><td class="num">${s.nto}</td>
+      </tr>`;
+    });
+  });
+  html += "</tbody></table>";
+  target.innerHTML = html;
+}
+
+function renderDaily(){
+  const container = document.getElementById("cards");
+  const selectedId = document.getElementById("userSelect")?.value || "all";
+  const weekFilterVal = document.getElementById("weekFilter")?.value || "all";
+  const findingKey = document.getElementById("findingFilter").value;
+  const sortKey = document.getElementById("sortBy").value;
+
+  let usersToRender = selectedId==="all" ? currentUsers.slice() : currentUsers.filter(u=>u.id===selectedId);
+  let daysWindow = null; // null = show full range
+
+  if(weekFilterVal !== "all"){
+    const week = weeks.find(w=>w.key===weekFilterVal);
+    if(week){
+      daysWindow = new Set(week.days);
+      // only scholars with at least one finding that week
+      usersToRender = usersToRender.filter(u=>{
+        const s = u.weekly[week.key];
+        return s && (s.absences+s.nti+s.nto+s.tardyCount) > 0;
+      });
+      if(findingKey !== "all"){
+        usersToRender = usersToRender.filter(u=>u.weekly[week.key][findingKey] > 0);
+      }
+      if(sortKey === "name"){
+        usersToRender.sort((a,b)=>a.name.localeCompare(b.name, undefined, {sensitivity:"base"}));
+      } else {
+        usersToRender.sort((a,b)=>b.weekly[week.key][sortKey] - a.weekly[week.key][sortKey]);
+      }
+    }
+  }
+
+  if(!usersToRender.length){
+    container.innerHTML = '<div class="empty">No scholars match this filter.</div>';
+    return;
+  }
+
+  const findingToViolation = {tardyCount:"Late", absences:"Absent", nti:"No Time In", nto:"No Time Out"};
+
+  container.innerHTML = usersToRender.map(u=>{
+    let days = daysWindow ? u.days.filter(d=>daysWindow.has(d.date)) : u.days;
+    if(daysWindow){
+      // within a selected week, show only the actual flagged day(s), not the whole week
+      // (exceptions/vacation/holiday are informational, not violations, so leave them out here too)
+      days = days.filter(d=>d.violation !== "OK" && !d.isException);
+      if(findingKey !== "all"){
+        days = days.filter(d=>d.violation === findingToViolation[findingKey]);
+      }
+    }
+    const rows = days.map(d=>{
+      const badge = d.violation==="OK" ? '<span class="badge ok">On time</span>'
+        : d.isException ? `<span class="badge exception">${d.violation}</span>`
+        : d.violation==="Late" ? `<span class="badge late">Late ${d.minutesLate}m</span>`
+        : d.violation==="Absent" ? '<span class="badge absent">Absent</span>'
+        : `<span class="badge missing">${d.violation}</span>`;
+      return `<tr><td>${d.date}</td><td>${d.timeIn||"-"}</td><td>${d.timeOut||"-"}</td><td>${badge}</td></tr>`;
+    }).join("");
+    return `<div class="card"><h3>${u.name} (${u.id})</h3>
+      <table><tr><th>Date</th><th>In</th><th>Out</th><th>Status</th></tr>${rows}</table></div>`;
+  }).join("");
+}
+
+// ---------- init (runs last, once every variable/function above exists) ----------
+updatePageStyle();
+renderExceptionList();
 </script>
 </body>
 </html>
