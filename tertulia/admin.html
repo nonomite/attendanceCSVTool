@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Tertulia Admin</title>
+<style>
+  :root{
+    --ink:#22102e; --ink-soft:#6a5b78; --line:#dcd0e8; --bg:#f3eef9;
+    --panel:#ffffff; --accent:#3b0075; --accent-soft:#ece1f7;
+    --ok:#2f8f5b; --warn:#c0392b;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:'Segoe UI',Tahoma,Verdana,sans-serif;font-size:14px;}
+  header{background:var(--panel);border-bottom:1px solid var(--line);padding:18px 24px;}
+  header h1{margin:0;font-size:19px;}
+  .wrap{max-width:1000px;margin:0 auto;padding:20px 24px 60px;}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:18px;margin-bottom:18px;}
+  .panel h2{font-size:13px;text-transform:uppercase;letter-spacing:.06em;color:var(--accent);margin:0 0 12px;}
+  label{display:block;font-size:12.5px;color:var(--ink-soft);margin-bottom:4px;}
+  input[type=text],input[type=email],input[type=password],input[type=file],textarea{
+    width:100%;padding:7px 8px;border:1px solid var(--line);border-radius:6px;font-size:13px;background:#fbfbfd;margin-bottom:10px;
+  }
+  .btn{appearance:none;border:none;border-radius:6px;padding:9px 16px;font-size:13px;font-weight:600;cursor:pointer;background:var(--accent);color:#fff;}
+  .btn:hover{background:#2a0057;}
+  .btn.secondary{background:var(--accent-soft);color:var(--accent);}
+  .btn.danger{background:#fbdedb;color:var(--warn);}
+  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;}
+  table{width:100%;border-collapse:collapse;font-size:12.5px;}
+  th,td{padding:7px 8px;text-align:left;border-bottom:1px solid var(--line);}
+  .status-msg{font-size:12.5px;color:var(--ink-soft);margin-top:6px;}
+  .status-msg.warn{color:var(--warn);}
+  .status-msg.ok{color:var(--ok);}
+  .pill{display:inline-block;padding:2px 9px;border-radius:20px;font-size:11px;font-weight:600;}
+  .pill.live{background:#e1f4ea;color:var(--ok);}
+  .pill.draft{background:#eee;color:var(--ink-soft);}
+  .pill.closed{background:#fbdedb;color:var(--warn);}
+  #qrBox{display:flex;flex-direction:column;align-items:center;padding:20px;}
+  #qrCanvas{margin-bottom:10px;}
+  #loginPanel{max-width:360px;margin:60px auto;}
+</style>
+</head>
+<body>
+
+<header><h1>Tertulia Admin</h1></header>
+
+<div class="wrap">
+
+  <div class="panel" id="loginPanel">
+    <h2>Sign in</h2>
+    <label for="loginEmail">Email</label>
+    <input type="email" id="loginEmail">
+    <label for="loginPassword">Password</label>
+    <input type="password" id="loginPassword">
+    <button class="btn" onclick="doLogin()">Sign in</button>
+    <div class="status-msg" id="loginMsg"></div>
+  </div>
+
+  <div id="appArea" style="display:none;">
+
+    <div class="panel">
+      <h2>Roster</h2>
+      <label for="rosterFile">Upload roster CSV (columns: student ID, name)</label>
+      <input type="file" id="rosterFile" accept=".csv">
+      <button class="btn secondary" onclick="uploadRoster()">Upload roster</button>
+      <div class="status-msg" id="rosterMsg"></div>
+    </div>
+
+    <div class="panel">
+      <h2>Sessions</h2>
+      <div class="row" style="margin-bottom:14px;">
+        <input type="text" id="newSessionLabel" placeholder="e.g. Tertulia - Aug 29, 2026" style="flex:1;margin-bottom:0;">
+        <button class="btn" onclick="createSession()">New session</button>
+      </div>
+      <table>
+        <thead><tr><th>Label</th><th>Status</th><th>Check-ins</th><th></th></tr></thead>
+        <tbody id="sessionRows"></tbody>
+      </table>
+      <div class="status-msg" id="sessionMsg"></div>
+    </div>
+
+    <div class="panel" id="qrPanel" style="display:none;">
+      <h2>Live QR &mdash; project this for students to scan</h2>
+      <div id="qrBox">
+        <div id="qrCanvas"></div>
+        <div id="qrLabel" style="font-weight:600;"></div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+<script>
+// =====================================================================
+// FILL THESE IN before deploying. Get them from:
+// Firebase console -> Project settings -> General -> "Your apps" -> SDK setup and configuration
+// =====================================================================
+ const firebaseConfig = {
+    apiKey: "AIzaSyBiQzgNJGyQSdE-YThuCxw8YCUYKgFLIMo",
+    authDomain: "tertuliatest-499e8.firebaseapp.com",
+    projectId: "tertuliatest-499e8",
+    storageBucket: "tertuliatest-499e8.firebasestorage.app",
+    messagingSenderId: "677433985291",
+    appId: "1:677433985291:web:c414359c2ec00914f73a0e",
+    measurementId: "G-RNCPRVTDDJ"
+  };
+
+
+// The public URL where checkin.html ends up hosted (e.g. your GitHub Pages
+// link). The QR code encodes this + ?session=<id>.
+const CHECKIN_BASE_URL = "PASTE_ME_e.g._https://nonomite.github.io/tertulia/checkin.html";
+// =====================================================================
+
+firebase.initializeApp(firebaseConfig);
+const auth = firebase.auth();
+const db = firebase.firestore();
+
+function doLogin(){
+  const email = document.getElementById("loginEmail").value.trim();
+  const password = document.getElementById("loginPassword").value;
+  const msg = document.getElementById("loginMsg");
+  auth.signInWithEmailAndPassword(email, password)
+    .catch(err=>{ msg.textContent = err.message; msg.className = "status-msg warn"; });
+}
+
+auth.onAuthStateChanged(user=>{
+  document.getElementById("loginPanel").style.display = user ? "none" : "block";
+  document.getElementById("appArea").style.display = user ? "block" : "none";
+  if(user){ listenSessions(); }
+});
+
+// ---------- roster upload ----------
+function parseCsvLine(line){
+  const values = []; let cur = ""; let inQ = false;
+  for(let i=0;i<line.length;i++){
+    const c = line[i];
+    if(c==='"'){ if(inQ && line[i+1]==='"'){cur+='"'; i++;} else inQ=!inQ; }
+    else if(c===',' && !inQ){ values.push(cur.trim()); cur=""; }
+    else cur+=c;
+  }
+  values.push(cur.trim());
+  return values;
+}
+
+async function uploadRoster(){
+  const file = document.getElementById("rosterFile").files[0];
+  const msg = document.getElementById("rosterMsg");
+  if(!file){ msg.textContent="Choose a CSV file first."; msg.className="status-msg warn"; return; }
+
+  const text = await file.text();
+  const lines = text.replace(/\r\n?/g,"\n").split("\n").filter(l=>l.trim());
+  const rows = lines.slice(1).map(parseCsvLine).filter(r=>r[0]);
+
+  if(!rows.length){ msg.textContent="No rows found in that file."; msg.className="status-msg warn"; return; }
+
+  try{
+    // Firestore batches cap at 500 writes; chunk if the roster is larger.
+    for(let i=0; i<rows.length; i+=450){
+      const batch = db.batch();
+      rows.slice(i, i+450).forEach(r=>{
+        const id = r[0];
+        const name = r.slice(1).join(",").trim();
+        batch.set(db.collection("roster").doc(id), {name});
+      });
+      await batch.commit();
+    }
+    msg.textContent = `Uploaded ${rows.length} roster entries.`;
+    msg.className = "status-msg ok";
+  } catch(err){
+    msg.textContent = "Upload failed: " + err.message;
+    msg.className = "status-msg warn";
+  }
+}
+
+// ---------- sessions ----------
+async function createSession(){
+  const label = document.getElementById("newSessionLabel").value.trim();
+  const msg = document.getElementById("sessionMsg");
+  if(!label){ msg.textContent="Give the session a label first."; msg.className="status-msg warn"; return; }
+  try{
+    await db.collection("sessions").add({label, status:"draft", createdAt: firebase.firestore.FieldValue.serverTimestamp()});
+    document.getElementById("newSessionLabel").value = "";
+    msg.textContent = "Session created.";
+    msg.className = "status-msg ok";
+  } catch(err){
+    msg.textContent = "Could not create session: " + err.message;
+    msg.className = "status-msg warn";
+  }
+}
+
+async function goLive(sessionId){
+  // Only one session should be live at a time, so close any others first.
+  const liveSnap = await db.collection("sessions").where("status","==","live").get();
+  const batch = db.batch();
+  liveSnap.forEach(doc=>{ if(doc.id !== sessionId) batch.update(doc.ref, {status:"closed"}); });
+  batch.update(db.collection("sessions").doc(sessionId), {status:"live"});
+  await batch.commit();
+}
+
+async function closeSession(sessionId){
+  await db.collection("sessions").doc(sessionId).update({status:"closed"});
+}
+
+function listenSessions(){
+  db.collection("sessions").orderBy("createdAt","desc").onSnapshot(async snap=>{
+    const tbody = document.getElementById("sessionRows");
+    const rowsHtml = [];
+    let liveSession = null;
+
+    for(const doc of snap.docs){
+      const s = doc.data();
+      if(s.status==="live") liveSession = {id:doc.id, ...s};
+      const countSnap = await db.collection("sessions").doc(doc.id).collection("checkins").get();
+      const actionBtn = s.status==="live"
+        ? `<button class="btn danger" onclick="closeSession('${doc.id}')">Close</button>`
+        : `<button class="btn secondary" onclick="goLive('${doc.id}')">Go live</button>`;
+      rowsHtml.push(`<tr>
+        <td>${s.label}</td>
+        <td><span class="pill ${s.status}">${s.status}</span></td>
+        <td>${countSnap.size}</td>
+        <td>${actionBtn}</td>
+      </tr>`);
+    }
+    tbody.innerHTML = rowsHtml.join("") || `<tr><td colspan="4">No sessions yet.</td></tr>`;
+
+    const qrPanel = document.getElementById("qrPanel");
+    if(liveSession){
+      qrPanel.style.display = "block";
+      document.getElementById("qrLabel").textContent = liveSession.label;
+      const qrBox = document.getElementById("qrCanvas");
+      qrBox.innerHTML = "";
+      const url = `${CHECKIN_BASE_URL}?session=${liveSession.id}`;
+      new QRCode(qrBox, {text:url, width:260, height:260});
+    } else {
+      qrPanel.style.display = "none";
+    }
+  });
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tertulia Check-In</title>
+<style>
+  :root{
+    --ink:#22102e; --ink-soft:#6a5b78; --line:#dcd0e8; --bg:#f3eef9;
+    --panel:#ffffff; --accent:#3b0075; --ok:#2f8f5b; --warn:#c0392b;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:'Segoe UI',Tahoma,Verdana,sans-serif;
+    display:flex;align-items:center;justify-content:center;min-height:100vh;padding:20px;}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:30px 26px;
+    max-width:380px;width:100%;text-align:center;}
+  h1{font-size:18px;margin:0 0 6px;}
+  p.sub{color:var(--ink-soft);font-size:13px;margin:0 0 22px;}
+  input[type=text]{
+    width:100%;padding:12px;border:1px solid var(--line);border-radius:8px;
+    font-size:16px;text-align:center;margin-bottom:14px;
+  }
+  .btn{width:100%;appearance:none;border:none;border-radius:8px;padding:12px;
+    font-size:15px;font-weight:600;cursor:pointer;background:var(--accent);color:#fff;}
+  .btn:disabled{background:#c6cbd9;cursor:not-allowed;}
+  .result{margin-top:16px;font-size:14px;font-weight:600;}
+  .result.ok{color:var(--ok);}
+  .result.warn{color:var(--warn);}
+</style>
+</head>
+<body>
+
+<div class="card">
+  <h1 id="titleText">Tertulia Check-In</h1>
+  <p class="sub" id="subText">Checking session status&hellip;</p>
+  <div id="formArea" style="display:none;">
+    <input type="text" id="studentId" placeholder="Enter your Student ID" autocomplete="off">
+    <button class="btn" id="submitBtn" onclick="submitCheckin()">Check in</button>
+  </div>
+  <div class="result" id="resultMsg"></div>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
+<script>
+// Same config as admin.html — Firebase console -> Project settings -> General
+ const firebaseConfig = {
+    apiKey: "AIzaSyBiQzgNJGyQSdE-YThuCxw8YCUYKgFLIMo",
+    authDomain: "tertuliatest-499e8.firebaseapp.com",
+    projectId: "tertuliatest-499e8",
+    storageBucket: "tertuliatest-499e8.firebasestorage.app",
+    messagingSenderId: "677433985291",
+    appId: "1:677433985291:web:c414359c2ec00914f73a0e",
+    measurementId: "G-RNCPRVTDDJ"
+  };
+
+firebase.initializeApp(firebaseConfig);
+const db = firebase.firestore();
+
+const params = new URLSearchParams(location.search);
+const sessionId = params.get("session");
+
+const titleText = document.getElementById("titleText");
+const subText = document.getElementById("subText");
+const formArea = document.getElementById("formArea");
+const resultMsg = document.getElementById("resultMsg");
+
+async function init(){
+  if(!sessionId){
+    subText.textContent = "No session was specified in this link.";
+    return;
+  }
+  try{
+    const doc = await db.collection("sessions").doc(sessionId).get();
+    if(!doc.exists){
+      subText.textContent = "This session doesn't exist.";
+      return;
+    }
+    const session = doc.data();
+    titleText.textContent = session.label || "Tertulia Check-In";
+    if(session.status !== "live"){
+      subText.textContent = "This session isn't accepting check-ins right now.";
+      return;
+    }
+    subText.textContent = "Enter your Student ID to check in.";
+    formArea.style.display = "block";
+  } catch(err){
+    subText.textContent = "Couldn't load this session: " + err.message;
+  }
+}
+init();
+
+async function submitCheckin(){
+  const idInput = document.getElementById("studentId");
+  const studentId = idInput.value.trim();
+  const btn = document.getElementById("submitBtn");
+  resultMsg.textContent = "";
+  resultMsg.className = "result";
+
+  if(!studentId){
+    resultMsg.textContent = "Enter your Student ID first.";
+    resultMsg.className = "result warn";
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = "Checking in\u2026";
+
+  try{
+    // Friendly pre-check so a mistyped ID gets a clear message rather than
+    // a generic permission error. The real, unbeatable enforcement still
+    // happens server-side via security rules on the write below.
+    const rosterDoc = await db.collection("roster").doc(studentId).get();
+    if(!rosterDoc.exists){
+      resultMsg.textContent = "That Student ID wasn't found on the roster. Check it and try again.";
+      resultMsg.className = "result warn";
+      btn.disabled = false; btn.textContent = "Check in";
+      return;
+    }
+
+    await db.collection("sessions").doc(sessionId).collection("checkins").doc(studentId).set({
+      studentId,
+      checkedInAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+
+    resultMsg.textContent = `You're checked in, ${rosterDoc.data().name || studentId}. \u2713`;
+    resultMsg.className = "result ok";
+    formArea.style.display = "none";
+
+  } catch(err){
+    if(err.code === "permission-denied"){
+      resultMsg.textContent = "You've already been checked in for this session.";
+    } else {
+      resultMsg.textContent = "Something went wrong: " + err.message;
+    }
+    resultMsg.className = "result warn";
+    btn.disabled = false;
+    btn.textContent = "Check in";
+  }
+}
+</script>
+</body>
+</html>
