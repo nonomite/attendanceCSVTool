@@ -92,6 +92,7 @@
   .badge.missing{background:#fbe4d4;color:var(--missing);}
   .badge.ok{background:#e1f4ea;color:var(--ok);}
   .badge.exception{background:var(--accent-soft);color:var(--accent);}
+  [title="Manually edited"]{color:var(--accent);font-size:11px;}
 
   .cardContainer{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;}
   .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 12px;}
@@ -113,7 +114,7 @@
 <body>
 
 <header>
-  <h1>Scholars Attendance Violation Monitor</h1>
+  <h1>Attendance Violation Monitor</h1>
   <p>Set the monitoring period, upload the records, get weekly violation counts.</p>
 </header>
 
@@ -158,7 +159,7 @@
     <div class="step disabled" id="stepFiles">
       <h2>3 &middot; Upload records</h2>
       <div class="field">
-        <label for="namesFile">Users CSV (id, name)</label>
+        <label for="namesFile">Users CSV (Biometrics ID, name)</label>
         <input type="file" id="namesFile" accept=".csv">
       </div>
       <div class="field">
@@ -196,6 +197,7 @@
           <option value="nto">Sort: Highest NTO</option>
         </select>
         <select id="userSelect" onchange="renderDaily()"></select>
+        <button class="btn secondary" id="editModeBtn" onclick="toggleEditMode()">Edit rows</button>
         <select id="paperSize" onchange="updatePageStyle()">
           <option value="letter">Letter</option>
           <option value="folio">Folio</option>
@@ -206,6 +208,12 @@
           <option value="landscape">Landscape</option>
         </select>
         <button class="btn secondary" onclick="window.print()">Print</button>
+        <button class="btn secondary" onclick="saveSnapshot()">Save snapshot</button>
+        <select id="imgFormat" style="width:80px;">
+          <option value="png">PNG</option>
+          <option value="jpeg">JPEG</option>
+        </select>
+        <button class="btn secondary" onclick="saveAsImage()">Save as image</button>
       </div>
     </div>
 
@@ -217,6 +225,8 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+<script type="application/json" id="snapshotData"></script>
 <script>
 // ---------- print page setup ----------
 const PAPER_SIZES = {
@@ -396,8 +406,12 @@ function computeMinutesLate(actualDateTime, expectedTime){
 }
 
 // ---------- core processing ----------
-let rawById = {};    // punches grouped by id -> date -> {inPunches,outPunches}
+let rawById = {};    // punches grouped by id -> date -> [{dt, status}, ...]
 let usersMeta = [];  // parsed Users CSV rows
+let manualOverrides = {}; // "id|date" -> {violation, minutesLate}
+let editMode = false;
+
+function overrideKey(id, date){ return id + "|" + date; }
 
 async function processFiles(){
   const attFile = document.getElementById("attendanceFile").files[0];
@@ -419,11 +433,8 @@ async function processFiles(){
       if(!dt) return;
       const date = toLocalDateStr(dt);
       if(!byId[p.id]) byId[p.id] = {};
-      if(!byId[p.id][date]) byId[p.id][date] = {inPunches:[], outPunches:[]};
-      const isIn = p.status.includes("in") && !p.status.includes("out");
-      const isOut = p.status.includes("out");
-      if(isIn) byId[p.id][date].inPunches.push(dt);
-      if(isOut) byId[p.id][date].outPunches.push(dt);
+      if(!byId[p.id][date]) byId[p.id][date] = [];
+      byId[p.id][date].push({dt, status:p.status});
     });
 
     const unmatchedIds = Object.keys(byId).filter(id=>!matchedIds.has(id));
@@ -451,30 +462,58 @@ function buildCurrentUsers(){
   currentUsers = usersMeta.map(user=>{
     const dayRecords = rawById[user.id] || {};
     const days = schoolDays.map(date=>{
-      const rec = dayRecords[date];
-      if(!rec || (rec.inPunches.length===0 && rec.outPunches.length===0)){
+      let day;
+      const rec = dayRecords[date]; // array of {dt, status}, or undefined
+      if(!rec || rec.length===0){
         const ex = exceptionByDate[date];
         if(ex){
-          return {date, timeIn:null, timeOut:null, minutesLate:0, violation: ex.label || ex.type, isException:true};
+          day = {date, timeIn:null, timeOut:null, minutesLate:0, violation: ex.label || ex.type, isException:true};
+        } else {
+          day = {date, timeIn:null, timeOut:null, minutesLate:0, violation:"Absent"};
         }
-        return {date, timeIn:null, timeOut:null, minutesLate:0, violation:"Absent"};
+      } else {
+        // Status column is ignored entirely for classification: earliest punch
+        // of the day is time-in, latest is time-out. For a lone punch we can't
+        // know which it was, so treat it as time-in and let No Time Out flag.
+        const sorted = [...rec].sort((a,b)=>a.dt-b.dt);
+        const timeIn = sorted[0].dt;
+        const timeOut = sorted.length > 1 ? sorted[sorted.length-1].dt : null;
+        const isSaturday = parseDateInput(date).getDay() === 6;
+
+        if(isSaturday){
+          // Time-in is handled manually now (not from biometrics) so Late/No-Time-In
+          // are never flagged on Saturdays. Only time-out matters: missing it means Absent.
+          day = {
+            date,
+            timeIn: timeIn ? timeIn.toTimeString().split(" ")[0] : null,
+            timeOut: timeOut ? timeOut.toTimeString().split(" ")[0] : null,
+            minutesLate: 0,
+            violation: timeOut ? "OK" : "Absent"
+          };
+        } else {
+          let violation = "OK";
+          let minutesLate = 0;
+          if(!timeIn) violation = "No Time In";
+          else if(!timeOut) violation = "No Time Out";
+          else {
+            minutesLate = computeMinutesLate(timeIn, OFFICIAL_IN);
+            if(minutesLate>0) violation = "Late";
+          }
+          day = {
+            date,
+            timeIn: timeIn ? timeIn.toTimeString().split(" ")[0] : null,
+            timeOut: timeOut ? timeOut.toTimeString().split(" ")[0] : null,
+            minutesLate, violation
+          };
+        }
       }
-      const timeIn = rec.inPunches.length ? new Date(Math.min(...rec.inPunches)) : null;
-      const timeOut = rec.outPunches.length ? new Date(Math.max(...rec.outPunches)) : null;
-      let violation = "OK";
-      let minutesLate = 0;
-      if(!timeIn) violation = "No Time In";
-      else if(!timeOut) violation = "No Time Out";
-      else {
-        minutesLate = computeMinutesLate(timeIn, OFFICIAL_IN);
-        if(minutesLate>0) violation = "Late";
+
+      // A manual edit always wins over whatever was auto-computed above.
+      const override = manualOverrides[overrideKey(user.id, date)];
+      if(override){
+        day = {...day, violation: override.violation, minutesLate: override.minutesLate, isException:false, isManualOverride:true};
       }
-      return {
-        date,
-        timeIn: timeIn ? timeIn.toTimeString().split(" ")[0] : null,
-        timeOut: timeOut ? timeOut.toTimeString().split(" ")[0] : null,
-        minutesLate, violation
-      };
+      return day;
     });
 
     const weekly = {};
@@ -504,6 +543,7 @@ function setView(v){
   document.getElementById("thresholdView").style.display = v==="threshold" ? "block" : "none";
   document.getElementById("weekFilter").style.display = "inline-block";
   document.getElementById("userSelect").style.display = v==="daily" ? "inline-block" : "none";
+  document.getElementById("editModeBtn").style.display = v==="daily" ? "inline-block" : "none";
   document.getElementById("lateThreshold").style.display = v==="threshold" ? "inline-block" : "none";
   if(v==="summary") renderSummary();
   else if(v==="daily") renderDaily();
@@ -518,7 +558,7 @@ function populateWeekFilter(){
 function populateUserSelect(){
   const sel = document.getElementById("userSelect");
   sel.innerHTML = '<option value="all">All users</option>' +
-    currentUsers.map(u=>`<option value="${u.id}">${u.name} (${u.id})</option>`).join("");
+    currentUsers.map(u=>`<option value="${u.id}">${u.name}</option>`).join("");
 }
 
 function onWeekChange(){
@@ -558,10 +598,10 @@ function renderThreshold(){
   }
 
   let html = `<table><thead><tr>
-    <th>Name</th><th>Biometrics ID</th><th>Week</th><th>Date</th><th>Time In</th><th class="num">Minutes Late</th>
+    <th>Name</th><th>Week</th><th>Date</th><th>Time In</th><th class="num">Minutes Late</th>
   </tr></thead><tbody>`;
   rows.forEach(r=>{
-    html += `<tr><td>${r.name}</td><td>${r.id}</td><td>${r.week}</td><td>${r.date}</td><td>${r.timeIn||"-"}</td><td class="num">${r.minutesLate}</td></tr>`;
+    html += `<tr><td>${r.name}</td><td>${r.week}</td><td>${r.date}</td><td>${r.timeIn||"-"}</td><td class="num">${r.minutesLate}</td></tr>`;
   });
   html += "</tbody></table>";
   target.innerHTML = html;
@@ -602,13 +642,13 @@ function renderSummary(){
   }
 
   let html = `<table><thead><tr>
-    <th>Name</th><th>Biometrics ID</th>
+    <th>Name</th>
     <th class="num">Late incidents</th><th class="num">Total minutes late</th>
     <th class="num">Absences</th><th class="num">No time in</th><th class="num">No time out</th>
   </tr></thead><tbody>`;
   rows.forEach(({u,s})=>{
     html += `<tr>
-      <td>${u.name}</td><td>${u.id}</td>
+      <td>${u.name}</td>
       <td class="num">${s.tardyCount}</td><td class="num">${s.totalMinutesLate}</td>
       <td class="num">${s.absences}</td><td class="num">${s.nti}</td><td class="num">${s.nto}</td>
     </tr>`;
@@ -620,19 +660,19 @@ function renderSummary(){
 function renderSummaryAllWeeks(target){
   if(!weeks.length){ target.innerHTML='<div class="empty">No data yet.</div>'; return; }
   let html = `<table><thead><tr>
-    <th>Name</th><th>Biometrics ID</th>
+    <th>Name</th>
     <th class="num">Late incidents</th><th class="num">Total minutes late</th>
     <th class="num">Absences</th><th class="num">No time in</th><th class="num">No time out</th>
   </tr></thead><tbody>`;
   weeks.forEach(w=>{
-    html += `<tr class="week-head"><td colspan="7">${w.label}</td></tr>`;
+    html += `<tr class="week-head"><td colspan="6">${w.label}</td></tr>`;
     currentUsers.forEach(u=>{
       const s = u.weekly[w.key];
       if(!s) return;
       const total = s.absences + s.nti + s.nto + s.tardyCount;
       if(total===0) return;
       html += `<tr>
-        <td>${u.name}</td><td>${u.id}</td>
+        <td>${u.name}</td>
         <td class="num">${s.tardyCount}</td><td class="num">${s.totalMinutesLate}</td>
         <td class="num">${s.absences}</td><td class="num">${s.nti}</td><td class="num">${s.nto}</td>
       </tr>`;
@@ -690,21 +730,155 @@ function renderDaily(){
       }
     }
     const rows = days.map(d=>{
+      if(editMode){
+        return renderEditableRow(u.id, d);
+      }
+      const overrideMark = d.isManualOverride ? '<span title="Manually edited">\u270e</span> ' : '';
       const badge = d.violation==="OK" ? '<span class="badge ok">On time</span>'
         : d.isException ? `<span class="badge exception">${d.violation}</span>`
         : d.violation==="Late" ? `<span class="badge late">Late ${d.minutesLate}m</span>`
         : d.violation==="Absent" ? '<span class="badge absent">Absent</span>'
         : `<span class="badge missing">${d.violation}</span>`;
-      return `<tr><td>${d.date}</td><td>${d.timeIn||"-"}</td><td>${d.timeOut||"-"}</td><td>${badge}</td></tr>`;
+      return `<tr><td>${d.date}</td><td>${d.timeIn||"-"}</td><td>${d.timeOut||"-"}</td><td>${overrideMark}${badge}</td></tr>`;
     }).join("");
-    return `<div class="card"><h3>${u.name} (${u.id})</h3>
+    return `<div class="card"><h3>${u.name}</h3>
       <table><tr><th>Date</th><th>In</th><th>Out</th><th>Status</th></tr>${rows}</table></div>`;
   }).join("");
+}
+
+const EDITABLE_STATUSES = ["OK","Late","Absent","No Time In","No Time Out","Vacation","Holiday"];
+
+function renderEditableRow(id, d){
+  const options = EDITABLE_STATUSES.map(s=>
+    `<option value="${s}" ${d.violation===s ? "selected":""}>${s==="OK" ? "On time" : s}</option>`
+  ).join("");
+  const showMinutes = d.violation === "Late";
+  return `<tr data-id="${id}" data-date="${d.date}">
+    <td>${d.date}</td><td>${d.timeIn||"-"}</td><td>${d.timeOut||"-"}</td>
+    <td>
+      <select class="edit-status" onchange="handleOverrideChange(this)">${options}</select>
+      <input type="number" class="edit-minutes" min="0" value="${d.minutesLate||0}"
+        style="width:55px;margin-left:4px;${showMinutes?"":"display:none;"}"
+        onchange="handleOverrideChange(this)">
+    </td>
+  </tr>`;
+}
+
+function handleOverrideChange(el){
+  const tr = el.closest("tr");
+  const id = tr.dataset.id, date = tr.dataset.date;
+  const statusSel = tr.querySelector(".edit-status");
+  const minutesInput = tr.querySelector(".edit-minutes");
+  const violation = statusSel.value;
+  minutesInput.style.display = violation === "Late" ? "inline-block" : "none";
+  const minutesLate = violation === "Late" ? (Number(minutesInput.value) || 0) : 0;
+
+  manualOverrides[overrideKey(id, date)] = {violation, minutesLate};
+  buildCurrentUsers();
+  renderActive();
+}
+
+function toggleEditMode(){
+  editMode = !editMode;
+  document.getElementById("editModeBtn").textContent = editMode ? "Done editing" : "Edit rows";
+  document.getElementById("editModeBtn").classList.toggle("btn", editMode);
+  document.getElementById("editModeBtn").classList.toggle("secondary", !editMode);
+  renderActive();
+}
+
+// ---------- image export ----------
+async function saveAsImage(){
+  const viewMap = {summary:"summaryView", daily:"dailyView", threshold:"thresholdView"};
+  const el = document.getElementById(viewMap[currentView]);
+  if(!el || !el.innerHTML.trim()){ alert("Nothing to capture yet \u2014 process records and pick a filter first."); return; }
+
+  const format = document.getElementById("imgFormat").value; // "png" | "jpeg"
+  try{
+    const canvas = await html2canvas(el, {backgroundColor:"#ffffff", scale:2});
+    const mime = format==="jpeg" ? "image/jpeg" : "image/png";
+    const ext = format==="jpeg" ? "jpg" : "png";
+    canvas.toBlob(blob=>{
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      const stamp = new Date().toISOString().slice(0,10);
+      a.href = url;
+      a.download = `attendance-${currentView}-${stamp}.${ext}`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    }, mime, 0.92);
+  } catch(err){
+    alert("Could not create image: " + err.message);
+  }
+}
+
+// ---------- snapshot save / load ----------
+async function saveSnapshot(){
+  if(!currentUsers.length){ alert("Process some records first."); return; }
+  try{
+    const res = await fetch(location.href, {cache:"no-store"});
+    if(!res.ok) throw new Error("fetch failed");
+    let html = await res.text();
+
+    const payload = {
+      savedAt: new Date().toISOString(),
+      periodStart, periodEnd, schoolDays, weeks, currentUsers
+    };
+    const json = JSON.stringify(payload).replace(/</g, "\\u003c"); // safe inside <script>
+
+    html = html.replace(
+      '<script type="application/json" id="snapshotData"><\/script>',
+      `<script type="application/json" id="snapshotData">${json}<\/script>`
+    );
+
+    const blob = new Blob([html], {type:"text/html"});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    const stamp = new Date().toISOString().slice(0,10);
+    a.href = url;
+    a.download = `attendance-report-snapshot-${stamp}.html`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  } catch(err){
+    alert("Couldn't save a snapshot: " + err.message + "\n\nThis works when the tool is opened from its GitHub Pages link, not from a local file.");
+  }
+}
+
+function loadFromSnapshotIfPresent(){
+  const el = document.getElementById("snapshotData");
+  if(!el || !el.textContent.trim()) return false;
+  try{
+    const data = JSON.parse(el.textContent);
+    periodStart = data.periodStart;
+    periodEnd = data.periodEnd;
+    schoolDays = data.schoolDays;
+    weeks = data.weeks;
+    currentUsers = data.currentUsers;
+
+    document.getElementById("startDate").value = periodStart;
+    document.getElementById("endDate").value = periodEnd;
+    document.getElementById("rangeMsg").textContent = `Snapshot saved ${new Date(data.savedAt).toLocaleString()} \u2014 ${schoolDays.length} school day(s) across ${weeks.length} week(s).`;
+    document.getElementById("stepFiles").classList.remove("disabled");
+    document.getElementById("fileMsg").textContent = "This is a saved snapshot. Upload new files above to replace it, or browse the results below as-is.";
+
+    populateWeekFilter();
+    populateUserSelect();
+    document.getElementById("results").style.display = "block";
+    setView("summary");
+    return true;
+  } catch(err){
+    console.error("Failed to load snapshot data:", err);
+    return false;
+  }
 }
 
 // ---------- init (runs last, once every variable/function above exists) ----------
 updatePageStyle();
 renderExceptionList();
+loadFromSnapshotIfPresent();
 </script>
 </body>
 </html>
